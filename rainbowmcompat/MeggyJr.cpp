@@ -1,4 +1,8 @@
 /*
+  RainbowMCompat - MeggyJr-compatible library for Rainbowduino
+  
+  Based on MeggyJr v1.31:
+  
   MeggyJr.cpp - Meggy Jr RGB library for Arduino
   Version 1.3 - 1/01/2009       http://www.evilmadscientist.com/
   Copyright (c) 2008 Windell H. Oskay.  All right reserved.
@@ -32,7 +36,8 @@ extern "C" {
 #include <wiring.h> 
 } 
 
-#include "MeggyJr.h" 
+#include "MeggyJr.h"
+#include "rainbow.h" 
 
 byte MeggyJr::MeggyFrame[DISP_BUFFER_SIZE];
 
@@ -51,82 +56,172 @@ unsigned int MeggyJr::ToneTimeRemaining;
 #ifdef timingtest
 unsigned int MeggyJr::testTime;
 #endif
-	
+
+/* Rainbowduino interrupt service functions, based on Rainbow_CMD_V2_0 from seeedstudio */	
+unsigned char rainbowLine,rainbowLevel;
+
+//==============================================================
+void shift_24_bit(unsigned char line,unsigned char level)   // display one line by the color level in buff
+{
+  unsigned char color=0,column=0;
+  unsigned char pixel=0;
+ 	unsigned char pixelOffset;
+  byte pixelPtr;
+  le_high;	//  Latch enable input
+  for(color=0;color<3;color++)//GRB
+  {
+  	pixelPtr = line*24;
+  	// Rainbowduino shift reg is in GRB order, MeggyFrame is in BGR order with one row of each colour
+  	switch (color) {
+  		case 0: pixelOffset = 8; break; // Green
+  		case 1: pixelOffset = 16; break; // Red
+  		case 2: pixelOffset = 0; break; //Blue
+  	}
+  	pixelPtr += pixelOffset;
+    for(column=0;column<8;column++)
+    {
+    	pixel = MeggyJr::MeggyFrame[pixelPtr++];
+
+			// inlined shift_1_bit
+      if(pixel>level)   //gray scale,0x0f always light
+      {
+        shift_data_1;
+      }
+      else
+      {
+        shift_data_0;
+      }
+  		clk_rising; //  clock port down, then up, to shift data into register
+		}  		
+  }
+  le_low;	//  Latch disable input
+}
+
+
+
+//==============================================================
+void open_line(unsigned char line)     // open the scanning line 
+{
+  switch(line)
+  {
+  case 0:
+    {
+      open_line0;
+      break;
+    }
+  case 1:
+    {
+      open_line1;
+      break;
+    }
+  case 2:
+    {
+      open_line2;
+      break;
+    }
+  case 3:
+    {
+      open_line3;
+      break;
+    }
+  case 4:
+    {
+      open_line4;
+      break;
+    }
+  case 5:
+    {
+      open_line5;
+      break;
+    }
+  case 6:
+    {
+      open_line6;
+      break;
+    }
+  case 7:
+    {
+      open_line7;
+      break;
+    }
+  }
+}
+//==============================================================
+void flash_next_line(unsigned char line,unsigned char level) // scan one line
+{
+  disable_oe;			//  MBI5168 disable output
+  close_all_line; //  all anodes down
+  open_line(line); //  anode for this line up
+  shift_24_bit(line,level); 
+  enable_oe; //  MBI5168 enable output
+}
+
+
+ISR(TIMER2_OVF_vect)          //Timer2  Service 
+{ 
+  TCNT2 = 0xE7; // TODO GamaTab[rainbowLevel];    // Reset a  scanning time by gamma value table
+  flash_next_line(rainbowLine,rainbowLevel);  // sacan the next line in LED matrix level by level.
+  rainbowLine++;
+  if(rainbowLine>7)        // when have scaned all LEC the back to line 0 and add the level
+  {
+    rainbowLine=0;
+    rainbowLevel++;
+    if(rainbowLevel>15)       rainbowLevel=0;
+  }
+}
+
+
+void init_timer2(void)               
+{
+  TCCR2A |= (1 << WGM21) | (1 << WGM20);   //  Fast PWM mode??
+  TCCR2B |= (1<<CS22);   // by clk/64
+  TCCR2B &= ~((1<<CS21) | (1<<CS20));   // by clk/64
+  TCCR2B &= ~((1<<WGM21) | (1<<WGM20));   // Use normal mode
+  ASSR |= (0<<AS2);       // Use internal clock - external clock not used in Arduino
+  TIMSK2 |= (1<<TOIE2) | (0<<OCIE2B);   //Timer2 Overflow Interrupt Enable
+  TCNT2 = 0xE7; // TODO GamaTab[0];
+  sei();   
+}
+
+
+
+void rainbow_init(void)    // define the pin mode
+{
+	//  All ports for output
+  DDRD=0xff;
+  DDRC=0xff;
+  DDRB=0xff;
+  //  output port values set to 0
+  PORTD=0;
+  PORTB=0;
+  init_timer2();  // initial the timer for scanning the LED matrix
+}
+
 /******************************************************************************
  * Constructor
  ******************************************************************************/
 
 MeggyJr::MeggyJr(void)			
 {
-// Initialization routine for Meggy Jr RGB hardware
+
+// Initialization routine for Meggy Jr lib and Rainbowduino hardware
 
 	AuxLEDs = 0;
 	currentColPtr = MeggyFrame;
 	currentCol=0;
 	currentBrightness=0;
 	
-PORTC = 255U;	// Pull-ups on Port C  (for detecting button presses)
-DDRC = 0;		//All inputs
-  
-DDRD = 254U;		// All D Output except for Rx
-PORTD = 254U;	
-		
-DDRB = 63U;	
-PORTB = 255;		
-
-//If a button is pressed at startup, turn sound off.
- if ((PINC & 63) != 63)
-{
   SoundAllowed = 0;
-} 
-else
-{
-  SoundAllowed = 1;
-} 
+  SoundEnabled = 0;
    
-   SoundEnabled = 0;
+	MeggyJr::ToneTimeRemaining = 0;
    
-MeggyJr::ToneTimeRemaining = 0;
-   
-//Turn display off:
-PORTD |= 252U;
-PORTB |= 17U;
+	ClearMeggy();
 
-ClearMeggy();
+	rainbow_init(); // Rainbowduino init code
   	 
-SPSR = (1<<SPI2X); 
-/*
-//ENABLE SPI, MASTER, CLOCK RATE fck/4:	
-SPCR = 80;// i.e., (1 << SPE) | ( 1 << MSTR ); 
- 
-SPDR = 0;
- while (!(SPSR & (1<<SPIF)))  { } // wait for last bitshift to complete
-SPDR = 0;
- while (!(SPSR & (1<<SPIF)))  { } // wait for last bitshift to complete
-SPDR = 0;
- while (!(SPSR & (1<<SPIF)))  { } // wait for last bitshift to complete
-SPDR = 0;
- while (!(SPSR & (1<<SPIF)))  { } // wait for last bitshift to complete
- 
-PORTB |= 4;		//Latch Pulse    
-PORTB &= 251;
-*/
-SPCR = 0; //turn off spi
-
-// setup the interrupt.
-TCCR2A = (1<<WGM21); // clear timer on compare match
-TCCR2B = (1<<CS21); // timer uses main system clock with 1/8 prescale
-OCR2A  = (F_CPU >> 3) / 8 / 15 / FPS; // Frames per second * 15 passes for brightness * 8 rows
-TIMSK2 = (1<<OCIE2A);	// call interrupt on output compare match
-
-sei( );    // Enable interrupts
-	
-	#ifdef timingtest
-MeggyJr::testTime = 0;
-#endif
-	
-	
 }
+
 
 /******************************************************************************
  * User API
@@ -167,9 +262,8 @@ void MeggyJr::SoundCheck(void)
 // Begin sound 
 void  MeggyJr::StartTone(unsigned int Tone, unsigned int duration)   
   {
-  OCR1A = Tone;
+  //NOP
   SoundState(1);
-  MeggyJr::ToneTimeRemaining = duration;  
   }
     	
  
@@ -205,7 +299,7 @@ MeggyFrame[PixelPtr] = 0;
 
 byte MeggyJr::GetButtons(void)
 {
-  return (~(PINC) & 63U); 
+  return (0); 
 }
 
 
@@ -215,227 +309,7 @@ byte MeggyJr::GetButtons(void)
 
 void MeggyJr::SoundState(byte t)
 {
-
-if ((t) && (SoundAllowed))
-	{ 
-    
- 		TCCR1A = 65;	// 0100 0001 
-		//COM1A10 = 01 :  Toggle output OC1A on compare match.
-		//WGM11,10: 01
-
-		TCCR1B = 17;	// 0001 0001  	// CS12..10 = 001: No clock prescaling. 
-		// WGM13,12: 10
-		// CS12,CS11,CS10: 001.  Count at CLKI/O/1 (no prescaling)
-
-		//WGM: 1001, phase+frequency correct PWM
-		// with top at OCR1A and update OCR1A at bottom.
-		
-        SoundEnabled = 1;
-		DDRB |= 2; 
-	}
-else
-	{
-	    SoundEnabled = 0;
-		TCCR1A = 0;	
-
-	if (t)
-	    TCCR1B = 128;		// Harmless; can use (TCCR1B == 0) to check if sound is done.
-	else
-		TCCR1B = 0; 	 
-		DDRB &= 253;
-		PORTB |= 2;
-	}
+	//NOP
+   SoundEnabled = 0;
 }
   
-
-SIGNAL(TIMER2_COMPA_vect)
-{			
-	// there are 15 passes through this interrupt for each row per frame.
-	// ( 15 * 8) = 120 times per frame.
-	// during those 15 passes, a led can be on or off.
-	// if it is off the entire time, the perceived brightness is 0/15
-	// if it is on the entire time, the perceived brightness is 15/15
-	// giving a total of 16 average brightness levels from fully off to fully on.
-	// currentBrightness is a comparison variable, used to determine if a certain
-	// pixel is on or off during one of those 15 cycles.   
-	//
-	// At 120 Hz refresh, this executes 15*8*120 = 14,400 times per second.
-	// Full routine takes about 340 cycles, 21 us. 
-	//
-	// 14400*340/16000000 = ~0.3; so about 1/3 of the processor time is spent in 
-	// this interrupt routine.
-
-#ifdef timingtest
-unsigned int soundTemp = OCR1A;
-OCR1A = 65500;
-TCNT1 = 0;
-#endif
-
-	if (++MeggyJr::currentBrightness >= MAX_BRIGHTNESS)  
-	{
-		MeggyJr::currentBrightness = 0;
-		if (++MeggyJr::currentCol > 7)
-		{
-			MeggyJr::currentCol = 0; 
-			MeggyJr::currentColPtr = MeggyJr::MeggyFrame;
-		}
-		else
-			MeggyJr::currentColPtr += 24;
-			 
-		if (MeggyJr::ToneTimeRemaining >  0)
-			{ 
-				if (--MeggyJr::ToneTimeRemaining == 0)
-					{
-						TCCR1A = 0;	  
-						DDRB &= 253;
-						PORTB |= 2;
-						TCCR1B = 0;  // High bit flags that the sound is done.
-					} 
-			} 
-	}
-		
-	////////////////////  Parse a row of data and write out the bits via spi
-  
-	byte *ptr = MeggyJr::currentColPtr + 23;  // it is more convenient to work from right to left
-	byte p;
-	byte cb =  MeggyJr::currentBrightness; 
-	// Optimization: interleave waiting for SPI with other code, so the CPU can do something useful
-	// when waiting for each SPI transmission to complete
-
-//Turn display off:
-PORTD |= 252U;
-PORTB |= 17U;
- 
-SPCR = 80;// i.e., (1 << SPE) | ( 1 << MSTR );   
-
-// First SPI word:  Aux LED drive.  Zero, except once per full screen redraw.	 
-  
-if ((cb + MeggyJr::currentCol ) == 0)
-	SPDR = MeggyJr::AuxLEDs;
-else
-    SPDR = 0; 
-        
-	byte bits=0; 
- 
-	p = *ptr--;
-	if (p > cb)  			
-          bits |= 128;
-	p = *ptr--;
-	if (p > cb)  			
-          bits |= 64;
-	p = *ptr--;
-	if (p > cb)  			
-          bits |= 32;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 16;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 8;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 4;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 2;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 1;
-		    
-//	while (!(SPSR & (1<<SPIF)))  { } // wait for prior bitshift to complete
-	SPDR = bits;
-	
-	bits=0;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 128;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 64;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 32;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 16;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 8;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 4;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 2;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 1;
-
-//	while (!(SPSR & (1<<SPIF)))  { } // wait for prior bitshift to complete
-	SPDR = bits;
-		
-	bits=0;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 128;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 64;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 32;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 16;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 8;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 4;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 2;
-	p = *ptr--;
-	if (p > cb)  				
-          bits |= 1;
-
-//asm("nop");	// short delay
-
-
-	while (!(SPSR & (1<<SPIF)))  { } // wait for prior bitshift to complete
-	SPDR = bits;
-	
-	////////////////////  Now set the row and latch the bits
-	byte portbTemp = 0;	
-	byte portdTemp = 0;
-
-	if (MeggyJr::currentCol == 0)
-		 portbTemp = 239U;
-	else if (MeggyJr::currentCol == 1)
-		 portbTemp = 254U;
-	else
-		 portdTemp = ~(1 << (9 - MeggyJr::currentCol));
-   
-	while (!(SPSR & (1<<SPIF)))  { } // wait for last bitshift to complete
- 
-PORTB |= 4;		//Latch Pulse    
-
-    if (MeggyJr::currentCol > 1)
-       PORTD &= portdTemp;
-    else
-       PORTB &= portbTemp;
-
-       PORTB &= 251;           //End Latch Pulse
-       SPCR = 0; //turn off spi 
-	    
-#ifdef timingtest
-
-if (TCNT1 > MeggyJr::testTime)
-   MeggyJr::testTime = TCNT1;
-   
-   OCR1A =  soundTemp;    
-#endif
-	
-}
-
