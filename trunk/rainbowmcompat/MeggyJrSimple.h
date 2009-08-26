@@ -1,4 +1,7 @@
 /*
+  RainbowMCompat - MeggyJr-compatible library for Rainbowduino
+  Based on MeggyJr v1.31:
+  
   MeggyJrSimple.h - Meggy Jr RGB library for Arduino
    The Meggy Jr Simplified Library (MJSL)
    
@@ -30,14 +33,14 @@
 
 MeggyJr Meg;
 byte GameSlate[8][8];       
-byte lastButtonState;
+byte lastButtonState=0;
 
-byte Button_A;		 
-byte Button_B;
-byte Button_Up;
-byte Button_Down;
-byte Button_Left;
-byte Button_Right;
+byte Button_A=0;		 
+byte Button_B=0;
+byte Button_Up=0;
+byte Button_Down=0;
+byte Button_Left=0;
+byte Button_Right=0;
  
 #define MeggyCursorColor   15,15,15				// You can define color constants like this.
 
@@ -84,39 +87,19 @@ enum colors {
   
 void CheckButtonsDown()
 	{ 
-	 byte i = Meg.GetButtons(); 
-	 
- 	 Button_B  = (i & 1);      
-     Button_A = (i & 2);     
-     Button_Up = (i & 4);
-     Button_Down = (i & 8);
-     Button_Left = (i & 16);
-     Button_Right = (i & 32);
-	 
-	 lastButtonState = i; 
+	//NOP
 	}
 	 
 void CheckButtonsPress()
 	{
-	 byte j;
-	 byte i = Meg.GetButtons();
-	 j = i & ~(lastButtonState);  // What's changed?
-	 
- 	 Button_B  = (j & 1);      
-     Button_A = (j & 2);     
-     Button_Up = (j & 4);
-     Button_Down = (j & 8);
-     Button_Left = (j & 16);
-     Button_Right = (j & 32);
-	 
-	 lastButtonState = i;
+	//NOP
 	}
  
  
 // Write a byte to the Auxiliary LED set at the top of the LED matrix display.  
 void SetAuxLEDs(byte InputLEDs)
 	{
-		Meg.AuxLEDs = InputLEDs;
+	//NOP
 	}
 
  
@@ -125,9 +108,7 @@ void SetAuxLEDs(byte InputLEDs)
 // This version reverses bit order, so you can call it with an explicit binary number
 void SetAuxLEDsBinary(byte n)
 {
-n = (n & 240) >> 4 | (n & 15) << 4; 
-n = (n & 204) >> 2 | (n & 51) << 2; 
-Meg.AuxLEDs = (n & 170) >>1 | (n & 85) << 1; 
+	//NOP
 }
 
  
@@ -289,9 +270,13 @@ void DisplaySlate (void) {
  */
   
    // "Cheater" functions
- #define SoundOn()    Meg.SoundState(1)
- #define SoundOff()   Meg.SoundState(0) 
- #define MakingSound  (TCCR1B > 0)		
+ // #define SoundOn()    Meg.SoundState(1)
+ // #define SoundOff()   Meg.SoundState(0) 
+ // #define MakingSound  (TCCR1B > 0)		
+ 
+ #define SoundOn();    {}
+ #define SoundOff();   {}
+ #define MakingSound  false
    
  
  
@@ -299,7 +284,7 @@ void DisplaySlate (void) {
  // other sound functions:
 void Tone_Start(unsigned int divisor, unsigned int duration_ms)
 {
-  Meg.StartTone(divisor, duration_ms);
+	//NOP
 }
 
 
@@ -332,7 +317,7 @@ void MeggyJrSimpleSetup(void)
 		
 	    lastButtonState = Meg.GetButtons();
 		
-		 Meg.StartTone(0, 0);
+  //		 Meg.StartTone(0, 0);
 	//	 Tone_Update();
 		 SoundOff();
   }
